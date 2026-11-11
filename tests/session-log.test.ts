@@ -1,6 +1,11 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {sanitizeMetrics} from '../server/session-log';
+import {sanitizeMetrics,formatLogTime} from '../server/session-log';
+
+test('log timestamp uses Vietnam time including midnight and date rollover',()=>{
+ assert.equal(formatLogTime(new Date('2026-11-11T10:30:00Z')),'11/11/2026 17:30:00');
+ assert.equal(formatLogTime(new Date('2026-12-31T17:00:00Z')),'01/01/2027 00:00:00');
+});
 
 test('session metrics whitelist excludes credentials, audio and arbitrary fields',()=>{
  const record=sanitizeMetrics({event:'checkpoint',elapsedMs:15000,totalTokens:123,inputTokens:100,outputTokens:23,

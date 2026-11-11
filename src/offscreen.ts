@@ -4,8 +4,9 @@ import {TabAudioCapture} from './capture';
 import {connectLive} from './connection';
 import {pcmPeak} from './pcm';
 import {estimate} from './usage';
-import {AudioPlayer,testSpeaker} from './audio';
+import {AudioPlayer} from './audio';
 import {LiveAudioStream} from './live-stream';
+import {type PopupState} from './popup-state';
 
 class TranslationSession {
  private capture=new TabAudioCapture();
@@ -27,8 +28,8 @@ class TranslationSession {
  private lastAudio=0;
  private startedAt=Date.now();
 
- constructor(secret:string,private onStopped:()=>void){
-  this.transport=new LiveAudioStream((callbacks,signal)=>connectLive(secret,callbacks,signal),{
+ constructor(private onStopped:()=>void){
+  this.transport=new LiveAudioStream((callbacks,signal)=>connectLive(callbacks,signal),{
    message:message=>this.receive(message),
    state:state=>{this.state=state;if(state==='Đang gửi / nhận audio liên tục')this.tokens=this.cost=this.unknown=0;this.publish();},
    error:error=>void this.stop(error.message),
@@ -60,7 +61,6 @@ class TranslationSession {
   await Promise.all([this.capture.close(),this.context.close().catch(()=>{})]);
  }
 
- async testSpeaker(){await testSpeaker(this.context);}
 
  private receive(message:LiveServerMessage){
   if(this.stopped)return;
@@ -81,6 +81,7 @@ class TranslationSession {
      this.output+=this.player.enqueue(audio.data,audio.mimeType);
     }
    }
+   if(message.serverContent?.turnComplete)this.player.endTurn();
   }catch(error){void this.stop('Lỗi phát audio: '+(error as Error).message);}
  }
 
@@ -91,27 +92,29 @@ class TranslationSession {
    `Audio Gemini đã xếp phát: ${this.output.toFixed(1)}s`,
    `Chunk audio Gemini: ${this.audioChunks} · Sự kiện: ${this.events}`,
    `Bộ phát: ${this.context.state} · Chờ phát: ${this.player.pendingSeconds.toFixed(1)}s`,
+   `Đệm mục tiêu: ${Math.round(this.player.bufferStats.targetSeconds*1000)}ms · Hụt đệm: ${this.player.bufferStats.underruns} · Bỏ audio cũ: ${this.player.bufferStats.skippedSeconds.toFixed(1)}s`,
    ...(this.lastAudio?[`Audio cuối: ${Math.round((Date.now()-this.lastAudio)/1000)}s trước`,...(Date.now()-this.lastAudio>15000?['Chưa có audio mới từ Live Translate. Kiểm tra tín hiệu nguồn và trạng thái kết nối.']:[])]:Date.now()-this.startedAt>15000?['Chưa nhận audio Live Translate. Kiểm tra audio nguồn gửi và quyền truy cập model.']:[]),
    `Token kết nối hiện tại: ${this.tokens}`,
    `Ước tính kết nối hiện tại: $${this.cost.toFixed(6)}${this.unknown?' (thiếu phân loại token)':''}`,
    'Không phải hóa đơn. Chi phí tiếp tục cho tới khi dừng.'
   ].join('\n');
-  void chrome.runtime.sendMessage({target:'background',type:'status',status}).catch(()=>{});
+  const details:PopupState={active:!this.stopped,message:this.state,model:MODEL,
+   receivedSeconds:this.received/10,sentSeconds:this.sent/10,outputSeconds:this.output,signal:this.peak>0.001,
+   tokens:this.tokens,estimatedUsd:this.cost,unknownTokens:this.unknown,
+   bufferMs:Math.round(this.player.bufferStats.targetSeconds*1000),queuedSeconds:this.player.pendingSeconds,
+   skippedSeconds:this.player.bufferStats.skippedSeconds,underruns:this.player.bufferStats.underruns,
+   audioChunks:this.audioChunks,events:this.events};
+  void chrome.runtime.sendMessage({target:'background',type:'status',status,details}).catch(()=>{});
  }
 }
 
 let current:TranslationSession|undefined;
 chrome.runtime.onMessage.addListener((message,_sender,reply)=>{
- if(message.target!=='offscreen'||!['start','stop','test-speaker'].includes(message.type))return;
+ if(message.target!=='offscreen'||!['start','stop'].includes(message.type))return;
  if(message.type==='start'&&current){reply({error:'Đang có phiên dịch. Hãy Dừng trước khi bắt đầu lại.'});return;}
  const task=(async()=>{
-  if(message.type==='test-speaker'){
-   if(current){await current.testSpeaker();return;}
-   const context=new AudioContext({sampleRate:24000});
-   try{await testSpeaker(context);}finally{await context.close();}return;
-  }
   if(message.type==='stop'){const previous=current;current=undefined;await previous?.stop();return;}
-  const session=new TranslationSession(message.secret,()=>{if(current===session)current=undefined;});current=session;
+  const session=new TranslationSession(()=>{if(current===session)current=undefined;});current=session;
   try{await session.start(message.streamId);}
   catch(error){await session.stop('Lỗi: '+(error as Error).message);if(current===session)current=undefined;throw error;}
  })();

@@ -1,20 +1,20 @@
 import { createServer } from 'node:http';
-import { timingSafeEqual,randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {appendSessionLog,sanitizeMetrics} from './session-log';
 import { GoogleGenAI } from '@google/genai';
 import { MODEL, liveConfig, TOKEN_LIFETIME_MS } from '../src/config.js';
-const { GEMINI_API_KEY, EXTENSION_ID, PAIRING_SECRET } = process.env;
-if (!GEMINI_API_KEY || !EXTENSION_ID?.match(/^[a-p]{32}$/) || !PAIRING_SECRET || PAIRING_SECRET.length < 32) throw Error('Configure GEMINI_API_KEY, EXTENSION_ID and PAIRING_SECRET in .env');
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta', timeout: 10000 } });
+import {BackendSettings} from './settings';
+import {dashboard,json} from './dashboard';
+const settings=new BackendSettings();await settings.load();
 let busy = false, last = 0;
-createServer(async (req, res) => {
+createServer(async (req, res) => {try{
   res.setHeader('Cache-Control', 'no-store'); res.setHeader('Vary', 'Origin');
-  if (req.headers.origin !== `chrome-extension://${EXTENSION_ID}`) { res.writeHead(403).end(); return; }
+  if(!['127.0.0.1:8787','localhost:8787'].includes(req.headers.host??'')){res.writeHead(403).end();return;}
+  if(await dashboard(req,res,settings))return;
+  if (!settings.publicState.ready||req.headers.origin !== `chrome-extension://${settings.id}`) { res.writeHead(403).end(); return; }
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
-  res.setHeader('Access-Control-Allow-Headers', 'authorization,content-type'); res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type'); res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204).end(); return; }
-  const got = Buffer.from(req.headers.authorization ?? ''); const wanted = Buffer.from(`Bearer ${PAIRING_SECRET}`);
-  if (got.length !== wanted.length || !timingSafeEqual(got, wanted)) { res.writeHead(401).end(); return; }
   const sessionMatch=/^\/sessions\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(req.url??'');
   if(req.method==='POST'&&sessionMatch){
     try{
@@ -28,6 +28,7 @@ createServer(async (req, res) => {
   if (busy || Date.now() - last < 10000) { res.writeHead(429).end(); return; } busy = true; last = Date.now();
   const sessionId=randomUUID();
   try {
+    const ai = new GoogleGenAI({ apiKey:settings.key, httpOptions: { apiVersion: 'v1beta', timeout: 10000 } });
     const token = await ai.authTokens.create(
       { config: { uses: 1, expireTime: new Date(Date.now() + TOKEN_LIFETIME_MS).toISOString(), newSessionExpireTime: new Date(Date.now() + 60000).toISOString(), liveConnectConstraints: { model: MODEL, config: liveConfig() } } }
     );
@@ -35,4 +36,5 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(502).end(JSON.stringify({ error: 'Không cấp được token Gemini. Kiểm tra model, API key, quota, nhật ký và kết nối backend.' }));
   } finally { busy = false; }
-}).listen(8787, '127.0.0.1', () => console.log('Token broker listening on http://127.0.0.1:8787'));
+}catch{if(!res.headersSent)json(res,500,{error:'Backend gặp lỗi xử lý yêu cầu.'});else res.end();}
+}).listen(8787, '127.0.0.1', () => console.log('Backend dashboard: http://127.0.0.1:8787'));

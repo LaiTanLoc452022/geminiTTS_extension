@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
-    "server": "tsx --env-file=.env server/index.ts",
+    "server": "tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {

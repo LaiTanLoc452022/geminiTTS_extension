@@ -42,3 +42,20 @@ test('a connection resolving after stop is closed',async()=>{
  resolve({sendRealtimeInput:()=>{},close:()=>{closes++;}});
  await pending;assert.equal(closes,1);
 });
+
+test('repeated short-lived sockets stop after three reconnect attempts',async()=>{
+ let attempts=0;let failure:Error|undefined;
+ let finished!:()=>void;const done=new Promise<void>(resolve=>{finished=resolve;});
+ const stream=new LiveAudioStream(async callbacks=>{
+  attempts++;
+  setTimeout(()=>callbacks.onclose?.({code:1006} as CloseEvent),1);
+  return {sendRealtimeInput:()=>{},close:()=>{}};
+ },{message:()=>{},state:()=>{},error:error=>{failure=error;finished();},sent:()=>{}},1);
+ try{
+  await stream.start();
+  const timeout=setTimeout(finished,1000);
+  await done;clearTimeout(timeout);
+  assert.equal(attempts,4,'initial connection plus three retries');
+  assert.match(failure?.message??'',/3 lần thử/);
+ }finally{stream.stop();}
+});

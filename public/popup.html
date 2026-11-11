@@ -1,1 +1,40 @@
-<!doctype html><html lang="vi"><meta charset="utf-8"><title>Dịch YouTube</title><style>body{font:14px system-ui;width:330px;padding:16px;background:#101827;color:#edf3ff}input,button{box-sizing:border-box;width:100%;padding:10px;margin:6px 0}button{cursor:pointer}pre{white-space:pre-wrap;font:12px system-ui;color:#bde5ff}</style><h2>Dịch YouTube trực tiếp</h2><p>Âm thanh tab được gửi tới Google Gemini. Âm thanh gốc YouTube và giọng dịch Gemini được phát song song.</p><label>Mã ghép nối backend<input id="secret" type="password" autocomplete="off"></label><button id="start">Bắt đầu · Giọng dịch tiếng Việt</button><button id="stop">Dừng</button><button id="test-speaker">Kiểm tra loa · Không gọi API</button><pre id="status">Sẵn sàng</pre><script type="module" src="popup.js"></script></html>
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube Live Translate</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header class="header">
+      <div class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4m4-8v12m4-15v18m4-15v12m4-8v4"/></svg></div>
+      <div><div class="eyebrow">YOUTUBE / LIVE TRANSLATE</div><h1>Nghe theo cách của bạn.</h1></div>
+      <span class="version">01</span>
+    </header>
+
+    <section class="session" aria-label="Phiên dịch">
+      <div class="session-top"><span id="badge" class="badge"><i></i><span id="badge-text">Sẵn sàng</span></span><span class="live-label">AUDIO → AUDIO</span></div>
+      <div class="languages"><div><span class="label">NGÔN NGỮ NGUỒN</span><strong>Tự nhận diện</strong></div><span class="arrow" aria-hidden="true">→</span><div><span class="label">GIỌNG DỊCH</span><strong>Tiếng Việt <span class="language-code">VI</span></strong></div></div>
+      <div id="wave" class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <p id="message" class="session-message" role="status">Mở video YouTube và bắt đầu nghe bản dịch.</p>
+      <div class="controls"><button id="start" class="primary"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z" fill="currentColor"/></svg><span>Bắt đầu dịch</span></button><button id="stop" class="stop" disabled><span class="stop-icon" aria-hidden="true"></span>Dừng</button></div>
+      <p class="hint">Tiếng gốc và giọng dịch được phát song song.</p>
+    </section>
+
+    <div id="error" class="error" role="alert" hidden></div>
+
+    <section class="usage" aria-label="Mức sử dụng kết nối hiện tại">
+      <div class="section-heading"><h2>Kết nối hiện tại</h2><span id="signal" class="muted">Chưa có tín hiệu</span></div>
+      <div class="metrics"><div><span>Audio đã gửi</span><strong id="sent">0.0<span>s</span></strong></div><div><span>Token</span><strong id="tokens">0</strong></div><div><span>Ước tính</span><strong id="cost">$0.000000</strong></div></div>
+      <p id="usage-note" class="footnote">Ước tính theo token đã nhận, không phải hóa đơn.</p>
+    </section>
+
+
+    <details class="diagnostics"><summary>Thông tin kỹ thuật<span class="chevron">⌄</span></summary><dl><div><dt>Audio model</dt><dd id="output">0.0 s</dd></div><div><dt>Chunk / sự kiện</dt><dd id="events">0 / 0</dd></div><div><dt>Hụt đệm / bỏ audio cũ</dt><dd id="dropped">0 / 0.0 s</dd></div></dl><pre id="status">Chưa có phiên dịch.</pre></details>
+    <footer><span class="footer-dot"></span>GEMINI 3.5 LIVE TRANSLATE<span class="footer-end">VIETNAMESE AUDIO</span></footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

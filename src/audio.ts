@@ -1,3 +1,5 @@
+import {AdaptiveAudioBuffer,AUDIO_BUFFER_LIMITS} from './adaptive-buffer';
+
 export function decodePCM(data: string) {
     const binary = atob(data);
     if (binary.length % 2)
@@ -11,9 +13,13 @@ export function decodePCM(data: string) {
 }
 export class AudioPlayer {
     private next = 0;
-    private sources = new Set<AudioBufferSourceNode>();
+    private sources = new Map<AudioBufferSourceNode,{buffer:AudioBuffer,start:number,end:number,offset:number}>();
+    private adaptive = new AdaptiveAudioBuffer();
+    private skipped = 0;
     constructor(private context: AudioContext) { }
     get pendingSeconds() { return Math.max(0, this.next - this.context.currentTime); }
+    get bufferStats() { return {targetSeconds:this.adaptive.targetSeconds,underruns:this.adaptive.underruns,skippedSeconds:this.skipped}; }
+    endTurn() { this.adaptive.endTurn(); }
     enqueue(data: string, mimeType: string) {
         if (!/^audio\/pcm(?:;|$)/i.test(mimeType))
             throw Error('Gemini returned unsupported audio format');
@@ -25,40 +31,56 @@ export class AudioPlayer {
             return 0;
         if (this.context.state !== 'running')
             throw Error('Audio bị tạm dừng bởi trình duyệt. Bấm Dừng rồi Bắt đầu lại.');
-        if (Math.max(this.next - this.context.currentTime, 0) + samples.length / rate > 20)
-            throw Error('Hàng đợi phát audio vượt 20 giây.');
         const buffer = this.context.createBuffer(1, samples.length, rate);
         buffer.copyToChannel(samples, 0);
+        const now=this.context.currentTime;
+        this.adaptive.observe(now,buffer.duration,this.next>0&&this.next<now);
+        if(this.pendingSeconds+buffer.duration>AUDIO_BUFFER_LIMITS.maxBacklog){
+            this.catchUp(buffer);
+        }else{
+            // Apply prebuffer on startup/rebuffer only; never insert silence between live chunks.
+            const when=this.next<=now?now+this.adaptive.targetSeconds:this.next;
+            this.schedule(buffer,when);
+        }
+        return buffer.duration;
+    }
+
+    private schedule(buffer:AudioBuffer,when:number,offset=0){
         const source = this.context.createBufferSource();
         source.buffer = buffer;
         source.connect(this.context.destination);
         source.onended = () => { this.sources.delete(source); source.disconnect(); };
-        this.sources.add(source);
-        const when = Math.max(this.next, this.context.currentTime + 0.03);
-        source.start(when);
-        this.next = when + buffer.duration;
-        return buffer.duration;
+        this.sources.set(source,{buffer,start:when,end:when+buffer.duration-offset,offset});
+        source.start(when,offset);
+        this.next = when + buffer.duration-offset;
     }
-    stop() { for (const source of this.sources) {
+
+    private catchUp(incoming:AudioBuffer){
+        const now=this.context.currentTime;
+        const buffers:Array<{buffer:AudioBuffer,offset:number}>=[];
+        let remaining=AUDIO_BUFFER_LIMITS.catchUpBacklog as number;
+        const old=[...this.sources.values()].filter(item=>item.end>now);
+        const candidates=[...old.map(item=>({buffer:item.buffer,offset:item.offset+Math.max(0,now-item.start)})),{buffer:incoming,offset:0}];
+        for(let i=candidates.length-1;i>=0&&remaining>0;i--){
+            const {buffer,offset}=candidates[i];
+            const keep=Math.min(buffer.duration-offset,remaining);
+            buffers.unshift({buffer,offset:buffer.duration-keep});remaining-=keep;
+        }
+        const retained=AUDIO_BUFFER_LIMITS.catchUpBacklog-remaining;
+        // Includes remaining scheduled audio only, not the part already played.
+        const queued=old.reduce((sum,item)=>sum+item.end-Math.max(now,item.start),0)+incoming.duration;
+        this.skipped+=Math.max(0,queued-retained);
+        this.cancelSources();
+        this.next=now+this.adaptive.targetSeconds;
+        // Reuse decoded buffers and start at an offset instead of copying PCM tails.
+        for(const {buffer,offset} of buffers)this.schedule(buffer,this.next,offset);
+    }
+
+    private cancelSources(){for (const source of this.sources.keys()) {
         source.onended = null;
         source.stop();
         source.disconnect();
-    } this.sources.clear(); this.next = 0; }
+    } this.sources.clear();}
+    stop() {this.cancelSources();this.next=0;this.skipped=0;this.adaptive.reset();}
 }
 
-/** Tests the same Web Audio output path without calling Gemini. */
-export async function testSpeaker(context: AudioContext) {
-    await context.resume();
-    if (context.state !== 'running') throw Error('Trình duyệt chưa cho phép phát audio.');
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 660;
-    gain.gain.setValueAtTime(0, context.currentTime);
-    gain.gain.linearRampToValueAtTime(0.12, context.currentTime + 0.03);
-    gain.gain.linearRampToValueAtTime(0, context.currentTime + 0.4);
-    oscillator.connect(gain).connect(context.destination);
-    await new Promise<void>(resolve => {
-        oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); resolve(); };
-        oscillator.start(); oscillator.stop(context.currentTime + 0.45);
-    });
-}

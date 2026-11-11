@@ -17,6 +17,7 @@ export class LiveAudioStream {
  private version=0;
  private reconnecting=false;
  private retryTimer?:ReturnType<typeof setTimeout>;
+ private stableTimer?:ReturnType<typeof setTimeout>;
  private pending:ArrayBuffer[]=[];
  private retries=0;
  private stopped=false;
@@ -41,7 +42,7 @@ export class LiveAudioStream {
 
  stop(){
   if(this.stopped)return;
-  this.stopped=true;this.version++;this.controller.abort();clearTimeout(this.retryTimer);
+  this.stopped=true;this.version++;this.controller.abort();clearTimeout(this.retryTimer);clearTimeout(this.stableTimer);
   this.pending=[];const connection=this.connection;this.connection=undefined;connection?.close();
  }
 
@@ -59,7 +60,9 @@ export class LiveAudioStream {
     onclose:event=>{if(version===this.version){this.lastFailure=`WebSocket đóng, mã ${event.code}`;this.reconnect();}}
    },this.controller.signal);
    if(this.stopped||version!==this.version){connection.close();return;}
-   this.connection=connection;this.reconnecting=false;this.retries=0;
+   this.connection=connection;this.reconnecting=false;
+   // An open socket alone does not prove the connection is healthy.
+   this.stableTimer=setTimeout(()=>{if(!this.stopped&&version===this.version)this.retries=0;},10000);
    this.events.state('Đang gửi / nhận audio liên tục');
    const buffered=this.pending;this.pending=[];
    for(let i=0;i<buffered.length;i++){
@@ -76,6 +79,7 @@ export class LiveAudioStream {
 
  private reconnect(){
   if(this.stopped||this.retryTimer)return;
+  clearTimeout(this.stableTimer);
   if(++this.retries>3){this.fail(Error(`Không thể kết nối lại Gemini sau 3 lần thử. ${this.lastFailure}`));return;}
   this.reconnecting=true;this.version++;
   const previous=this.connection;this.connection=undefined;previous?.close();
